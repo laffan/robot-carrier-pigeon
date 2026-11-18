@@ -1,0 +1,114 @@
+# Builds the macOS app (universal: Apple silicon + Intel).
+#
+# - Push a tag like v0.2.0  -> builds and creates a *draft* GitHub release with
+#   the .dmg attached. Review it on GitHub, then publish.
+# - Run manually (Actions › Release › Run workflow) -> test build only; the
+#   .dmg is attached to the run as an artifact, no release is created.
+#
+# Secrets:
+#   VITE_GOOGLE_CLIENT_ID   required; compiled into the app for Google sign-in.
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+#                           optional; with them the app is signed with a
+#                           Developer ID and notarized. Without them it is
+#                           ad-hoc signed and macOS asks users to approve it.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - name: Check tag matches app version
+        if: env.IS_TAG == 'true'
+        run: |
+          v=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $v in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+
+      - name: Require Google client ID
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+        run: |
+          if [ -z "$VITE_GOOGLE_CLIENT_ID" ]; then
+            echo "::error::The VITE_GOOGLE_CLIENT_ID secret is not set; Google sign-in would be disabled in this build."
+            exit 1
+          fi
+
+      # Tauri treats a set-but-empty APPLE_* variable as "sign with this", so
+      # only export them when a certificate is actually configured.
+      - name: Configure code signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            for k in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -n "${!k}" ]; then
+                { echo "$k<<__END__"; printf '%s\n' "${!k}"; echo "__END__"; } >> "$GITHUB_ENV"
+              fi
+            done
+            echo "Signing with Developer ID certificate."
+          else
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "::warning::No Apple Developer ID certificate configured: the app is ad-hoc signed and not notarized."
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+        with:
+          args: --target universal-apple-darwin
+          tagName: ${{ env.IS_TAG == 'true' && github.ref_name || '' }}
+          releaseName: Robot Carrier Pigeon v__VERSION__
+          releaseDraft: true
+          releaseBody: |
+            Download the `.dmg`, open it and drag the app to Applications.
+
+            If macOS says the app can't be opened because it's from an unidentified developer, open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**. You only need to do this once.
+
+      - name: Attach test build to the run
+        if: env.IS_TAG != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-dmg
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

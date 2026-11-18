@@ -67,6 +67,30 @@ After `ios init`, run `npx tauri icon app-icon.svg` so the Xcode project gets Ca
 
 Set your signing team in `src-tauri/tauri.conf.json` under `bundle.iOS.developmentTeam`, or with the `APPLE_DEVELOPMENT_TEAM` environment variable. `src-tauri/Info.ios.plist` is merged into the generated Info.plist. It makes saved attachments appear in *Files › On My iPad › Carrier*.
 
+## Releases
+
+GitHub Actions builds the macOS app (universal: Apple silicon and Intel). The workflows are in `.github/workflows/`:
+
+- **CI** (`ci.yml`) runs `npm run check` and `npm test` on every push to `main` and on pull requests.
+- **Release** (`release.yml`) builds the `.dmg`.
+
+To publish a release:
+
+1. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`, then commit.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`. The tag must match the version in `tauri.conf.json`, or the build stops.
+3. When the workflow finishes, a **draft** release with the `.dmg` attached appears under Releases. Check it, then publish.
+
+To try a build without making a release, run **Actions › Release › Run workflow**. The `.dmg` is attached to the run as an artifact.
+
+**Secrets** (Settings › Secrets and variables › Actions):
+
+| Secret | |
+| --- | --- |
+| `VITE_GOOGLE_CLIENT_ID` | Required. The same value as in `.env`. The build fails without it rather than shipping an app with sign-in disabled. |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Optional. With a Developer ID certificate the app is signed and notarized. Without them it is ad-hoc signed, and people must click *Open Anyway* in System Settings › Privacy & Security the first time. See [Tauri's macOS signing guide](https://v2.tauri.app/distribute/sign/macos/). |
+
+iPad builds are not part of the workflow; build those locally with Xcode.
+
 ## Features
 
 ### Implemented (Gmail parity)
