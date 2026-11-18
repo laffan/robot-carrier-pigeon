@@ -146,6 +146,7 @@ iPad builds are not part of the workflow; build those locally with Xcode.
   | `⌘B` / `⌘I` / `⌘K` / `⌘E` / `⌘⇧X` | Bold / italic / link / code / strikethrough (in the editor) |
 
 - **Appearance.** Light, dark and system themes. Messages always sit on the app background; in dark mode, designed HTML mail is colour-inverted (images kept) so it stays readable. Each account has a colour, shown as a glowing bar at the window's left edge beside its messages (change it in Settings). Two panes on a landscape iPad or a Mac, and a persistent sidebar on wide screens.
+- **Night vision.** The eye between Search and Compose draws the whole app, mail included, in shades of red only (no blue or green light), so your eyes stay adapted to the dark. It works over either theme and stays on until you turn it off. It is drawn as two layers over the window (`lib/nightVision.ts`): one reduces everything to its brightness, the next multiplies that by pure red. System sheets (Google sign-in, the share sheet, the keyboard) are drawn by the OS and keep their colours.
 
 ### Pinning
 
@@ -194,6 +195,7 @@ src/
     app.svelte.ts            state + mailbox actions (optimistic, undoable)
     compose.svelte.ts        compose/reply/forward/drafts/undo-send
     settings.svelte.ts       persisted preferences
+    nightVision.ts           night vision: the window in red alone
     browser.ts               default browser: rewriting links into browser URL schemes
     platform.ts              Tauri vs browser: HTTP, Keychain, store, files, opener
     mail/

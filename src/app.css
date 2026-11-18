@@ -140,6 +140,32 @@ a {
 .icon-btn.on {
   color: var(--pin);
 }
+/* A toggle that is on (night vision). */
+.icon-btn[aria-pressed="true"] {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+/* Night vision (lib/nightVision.ts): the whole app in red alone. Two
+   click-through layers on <body>, over everything else. */
+.night-vision-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+/* 1. Everything under it reduced to its luminance. */
+#night-vision-grey {
+  z-index: 2147483646;
+  -webkit-backdrop-filter: grayscale(1);
+  backdrop-filter: grayscale(1);
+}
+/* 2. That grey multiplied by pure red: luminance in red, no green or
+   blue. */
+#night-vision-red {
+  z-index: 2147483647;
+  background: #f00;
+  mix-blend-mode: multiply;
+}
 
 .text-btn {
   padding: 8px 12px;

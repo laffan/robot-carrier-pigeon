@@ -1,4 +1,5 @@
 import { kvGet, kvSet } from "./platform";
+import { applyNightVision } from "./nightVision";
 
 export type SwipeAction = "archive" | "trash" | "read" | "pin" | "none";
 
@@ -11,6 +12,8 @@ export interface Settings {
   inboxType: "primary" | "everything";
   loadRemoteImages: boolean;
   theme: "system" | "light" | "dark";
+  /** The app drawn in red alone (lib/nightVision.ts): the list header's eye. */
+  nightVision: boolean;
   defaultReply: "reply" | "replyAll";
   /** Markdown signatures keyed by send-as address. */
   signatures: Record<string, string>;
@@ -31,6 +34,7 @@ export const DEFAULTS: Settings = {
   inboxType: "primary",
   loadRemoteImages: true,
   theme: "system",
+  nightVision: false,
   defaultReply: "reply",
   signatures: {},
   accountColors: {},
@@ -75,11 +79,13 @@ class SettingsStore {
     await kvSet("settings", $state.snapshot(this.value));
   }
 
+  /** The theme, and night vision over it. */
   applyTheme() {
     if (typeof document === "undefined") return;
     const t = this.value.theme;
     if (t === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", t);
+    applyNightVision(this.value.nightVision);
   }
 }
 

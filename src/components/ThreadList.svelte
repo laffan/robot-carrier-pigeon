@@ -4,6 +4,7 @@
   import { composer } from "../lib/compose.svelte";
   import { settings, type SwipeAction } from "../lib/settings.svelte";
   import ThreadRow from "./ThreadRow.svelte";
+  import NightVisionIcon from "./NightVisionIcon.svelte";
   import Popover from "./Popover.svelte";
   import LabelPicker from "./LabelPicker.svelte";
   import type { ThreadSummary } from "../lib/mail/types";
@@ -292,6 +293,13 @@
       {#if app.refreshing}<span class="spinner small"></span>{/if}
       <div class="actions">
         <button class="icon-btn" aria-label="Search" title="Search (/)" onclick={startSearch}><Search size={19} strokeWidth={1.7} /></button>
+        <button
+          class="icon-btn"
+          aria-label="Night vision"
+          aria-pressed={settings.value.nightVision}
+          title={settings.value.nightVision ? "Night vision is on: press for colour" : "Night vision: red only, no blue light"}
+          onclick={() => settings.update({ nightVision: !settings.value.nightVision })}
+        ><NightVisionIcon size={19} strokeWidth={1.7} /></button>
         <button class="icon-btn" aria-label="Compose" title="Compose (c)" onclick={() => composer.openNew()}><SquarePen size={19} strokeWidth={1.7} /></button>
       </div>
     {/if}
