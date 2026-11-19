@@ -2,6 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- iPad trackpad: in landscape, two-finger scrolls arrived with their axes
+       swapped (up/down moved sideways). Same fix as in Snorkle (commits
+       9cb5dd3 and 8c7eb87): native indirect (trackpad/mouse) input, and Tao's
+       scene lifecycle so the window is created in its scene's orientation
+       instead of on the legacy application-delegate path. One window only;
+       Tao (0.37.2, pinned in Cargo.lock) supplies TaoSceneDelegate. -->
+  <key>UIApplicationSupportsIndirectInputEvents</key>
+  <true/>
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>Default Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>TaoSceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
   <!-- Saved attachments appear in Files › On My iPad › Carrier -->
   <key>UIFileSharingEnabled</key>
   <true/>

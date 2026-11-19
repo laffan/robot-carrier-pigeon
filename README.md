@@ -65,7 +65,7 @@ npm run tauri ios dev       # simulator, or choose a connected iPad
 
 After `ios init`, run `npx tauri icon app-icon.svg` so the Xcode project gets Carrier's icon.
 
-Set your signing team in `src-tauri/tauri.conf.json` under `bundle.iOS.developmentTeam`, or with the `APPLE_DEVELOPMENT_TEAM` environment variable. `src-tauri/Info.ios.plist` is merged into the generated Info.plist. It makes saved attachments appear in *Files › On My iPad › Carrier*.
+Set your signing team in `src-tauri/tauri.conf.json` under `bundle.iOS.developmentTeam`, or with the `APPLE_DEVELOPMENT_TEAM` environment variable. `src-tauri/Info.ios.plist` is merged into the generated Info.plist. It makes saved attachments appear in *Files › On My iPad › Carrier*. It also turns on native trackpad input and Tao's single-window scene lifecycle (`UIApplicationSupportsIndirectInputEvents`, `UIApplicationSceneManifest` with `TaoSceneDelegate`). Without these, two-finger trackpad scrolls on a landscape iPad came through with their axes swapped. They are Info.plist settings, so rebuild and reinstall the app after changing them; reloading the web code does not apply them.
 
 ## Releases
 
