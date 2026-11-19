@@ -147,7 +147,7 @@ iPad builds are not part of the workflow; build those locally with Xcode.
   | `⌘↩` | Send |
   | `⌘B` / `⌘I` / `⌘K` / `⌘E` / `⌘⇧X` | Bold / italic / link / code / strikethrough (in the editor) |
 
-- **Appearance.** Light, dark and system themes. Messages always sit on the app background; in dark mode, designed HTML mail is colour-inverted (images kept) so it stays readable. Each account has a colour, shown as a glowing bar at the window's left edge beside its messages (change it in Settings). Two panes on a landscape iPad or a Mac, and a persistent sidebar on wide screens.
+- **Appearance.** Light, dark and system themes. Messages always sit on the app background; in dark mode, designed HTML mail is colour-inverted (images kept) so it stays readable. After that, any text whose colour is too close to what it's drawn on (contrast below 3:1: dark text on a dark background, light text on a light one) has its lightness flipped, keeping its hue, until it reads at 4.5:1 (`lib/contrast.ts`). This catches, for example, black text written for a white page on the dark theme, or white text from a dark-mode mail client on the light theme. Text over images and hidden preheader text are left alone. Each account has a colour, shown as a glowing bar at the window's left edge beside its messages (change it in Settings). Two panes on a landscape iPad or a Mac, and a persistent sidebar on wide screens.
 - **Activity console.** The terminal icon beside Settings, at the bottom of the sidebar, opens a console along the bottom of the window with everything the app does: your actions, list loads and refreshes, every mailbox call with its arguments, result and timing, HTTP requests, sign-in, compose and settings changes, and errors. Filter by actions, network or problems; copy or clear the lines; drag the top edge to resize. The log is kept in memory only (the latest 1,500 lines), and tokens and other credentials in URLs are blanked.
 - **Night vision.** The eye between Search and Compose draws the whole app, mail included, in shades of red only (no blue or green light), so your eyes stay adapted to the dark. It works over either theme and stays on until you turn it off. It is drawn as two layers over the window (`lib/nightVision.ts`): one reduces everything to its brightness, the next multiplies that by pure red. System sheets (Google sign-in, the share sheet, the keyboard) are drawn by the OS and keep their colours.
 
@@ -202,6 +202,7 @@ src/
     log.svelte.ts            activity log behind the console
     wheel.ts                 trackpad gestures: wheel events grouped and locked to an axis
     nightVision.ts           night vision: the window in red alone
+    contrast.ts              recolours mail text too close to its background
     browser.ts               default browser: rewriting links into browser URL schemes
     platform.ts              Tauri vs browser: HTTP, Keychain, store, files, opener
     mail/

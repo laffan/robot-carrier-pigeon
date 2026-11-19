@@ -8,6 +8,8 @@
   import { toasts } from "../lib/toasts.svelte";
   import { composer } from "../lib/compose.svelte";
   import { settings } from "../lib/settings.svelte";
+  import { backgroundOf, fixContrast, invert, type RGB } from "../lib/contrast";
+  import { log } from "../lib/log.svelte";
 
   interface Props {
     html?: string;
@@ -124,6 +126,8 @@
    *   dark text on a white design becomes light text on the dark background.
    * The frame's color-scheme always matches the app's: when they differ,
    * WebKit paints an opaque white backdrop behind the frame.
+   * After loading, text that still has too little contrast with what it's
+   * drawn on (dark on dark, light on light) is recoloured (lib/contrast.ts).
    */
   const srcdoc = $derived.by(() => {
     const p = prepared;
@@ -165,6 +169,25 @@
     height = Math.max(20, h);
   }
 
+  /**
+   * Recolours text that is too close to its background: the message's own
+   * colours, or the app's background showing through. Runs on load and when
+   * quoted text is revealed (hidden text isn't checked).
+   */
+  function adjustContrast() {
+    const f = frame;
+    const doc = f?.contentDocument;
+    const win = doc?.defaultView;
+    if (!f || !doc?.body || !win) return;
+    const fallback: RGB = dark ? [18, 18, 19] : [255, 255, 255];
+    const page = backgroundOf(f, fallback, window) ?? fallback;
+    // Under the dark theme's invert filter, the document's colours are the
+    // inverse of what's shown, so compare against the inverse of the page.
+    const inverted = win.getComputedStyle(doc.documentElement).filter.includes("invert");
+    const n = fixContrast(doc, inverted ? invert(page) : page);
+    if (n) log.debug("ui", `Recoloured ${n === 1 ? "1 low-contrast passage" : `${n} low-contrast passages`} in a message`);
+  }
+
   /** Watches the loaded document's height; replaced on each load and dropped with the frame. */
   let resize: ResizeObserver | undefined;
   onDestroy(() => resize?.disconnect());
@@ -173,6 +196,7 @@
     const doc = frame?.contentDocument;
     if (!doc) return;
     doc.documentElement.classList.toggle("show-quoted", showQuoted);
+    adjustContrast();
     measure();
     // A frame that's gone (or reloaded with new content) must not stay
     // observed: Chromium then reports a ResizeObserver loop on every frame.
@@ -205,6 +229,7 @@
 
   $effect(() => {
     frame?.contentDocument?.documentElement.classList.toggle("show-quoted", showQuoted);
+    if (showQuoted) adjustContrast();
     measure();
   });
 </script>

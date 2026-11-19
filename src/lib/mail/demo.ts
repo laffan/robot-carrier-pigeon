@@ -92,6 +92,16 @@ const seeds: Seed[] = [
     labels: ["INBOX", "CATEGORY_PROMOTIONS", "UNREAD"],
   },
   {
+    // Mail with its own text colours and no background: black text and a navy
+    // link written for a white page, and a white line from a phone in dark mode.
+    from: 3,
+    subject: "Venue shortlist",
+    body: "<div style='color:#000000;font-family:Calibri,sans-serif'>Here are the three venues I liked. The second one has the best light, and it's free on the 14th.</div><div style='color:#000000;font-family:Calibri,sans-serif'><br><a href='https://example.com/venues' style='color:#0b2e6b'>See the shortlist</a></div><br><div style='color:#ffffff'>Sent from my phone</div>",
+    html: true,
+    ago: 1.5 * D,
+    labels: ["INBOX", "CATEGORY_PERSONAL"],
+  },
+  {
     from: 7,
     subject: "Your trip confirmation: SFO → JFK",
     body: "Confirmation #K7Q2LM\n\nDeparts Thu, Nov 20, 7:05 AM\nArrives 3:40 PM\n\nSeat 21A",
