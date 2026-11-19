@@ -222,6 +222,26 @@ export class GmailBackend implements MailBackend {
     return { threads, nextPageToken: res.nextPageToken };
   }
 
+  async countThreads(query: ListQuery, limit: number): Promise<number> {
+    const labelIds = await this.toGmail(query.labelIds ?? []);
+    if (!labelIds) return 0;
+    // Ids only, up to 500 a page: usually a single small request.
+    let n = 0;
+    let token: string | undefined;
+    do {
+      const p = new URLSearchParams();
+      for (const l of labelIds) p.append("labelIds", l);
+      if (query.q) p.set("q", query.q);
+      if (token) p.set("pageToken", token);
+      p.set("maxResults", String(Math.min(500, limit - n)));
+      p.set("fields", "threads/id,nextPageToken");
+      const res = await this.json<{ threads?: { id: string }[]; nextPageToken?: string }>(`/threads?${p}`);
+      n += res.threads?.length ?? 0;
+      token = res.nextPageToken;
+    } while (token && n < limit);
+    return n;
+  }
+
   private summarize(t: GmailThread): ThreadSummary {
     const msgs = [...(t.messages ?? [])].sort((a, b) => Number(a.internalDate) - Number(b.internalDate));
     const real = msgs.filter((m) => !m.labelIds?.includes("DRAFT"));

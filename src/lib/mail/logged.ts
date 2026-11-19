@@ -29,6 +29,7 @@ function kb(chars: number): string {
 function result(v: unknown): string {
   if (v === undefined) return "ok";
   if (typeof v === "string") return kb(v.length);
+  if (typeof v === "number") return String(v);
   if (Array.isArray(v)) return plural(v.length, "item");
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;

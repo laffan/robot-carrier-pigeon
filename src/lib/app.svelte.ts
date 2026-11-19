@@ -58,6 +58,8 @@ const PAGE = 30;
 const PINNED_MAX = 50;
 /** How many drafts the Inbox's Drafts section shows. */
 const DRAFTS_SHOWN = 5;
+/** Unread counts stop here (the sidebar shows 999+). */
+const COUNT_MAX = 1000;
 
 class App {
   ready = $state(false);
@@ -67,6 +69,12 @@ class App {
   current = $state<string>(ALL);
   view = $state<View>({ kind: "label", label: "INBOX" });
   labels = $state<Record<string, Label[]>>({});
+  /**
+   * Unread conversations in Primary and each Inbox tab, per account. Gmail's
+   * label counts can't be used for these: its category labels stay on
+   * archived mail, so they count unread mail anywhere in the account.
+   */
+  inboxUnread = $state<Record<string, Record<string, number>>>({});
 
   threads = $state<ThreadSummary[]>([]);
   loading = $state(false);
@@ -212,7 +220,7 @@ class App {
       this.accounts.map(async (a) => {
         try {
           const b = this.backend(a.email);
-          const [sendAs, labels] = await Promise.all([b.listSendAs(), b.listLabels(true)]);
+          const [sendAs, labels] = await Promise.all([b.listSendAs(), b.listLabels(true), this.countInbox(a.email)]);
           this.labels[a.email] = labels;
           const idx = this.accounts.findIndex((x) => x.email === a.email);
           if (idx >= 0) this.accounts[idx] = { ...this.accounts[idx], sendAs, needsReauth: false };
@@ -228,12 +236,37 @@ class App {
     await Promise.all(
       this.accounts.map(async (a) => {
         try {
-          this.labels[a.email] = await this.backend(a.email).listLabels(true);
+          const [labels] = await Promise.all([this.backend(a.email).listLabels(true), this.countInbox(a.email)]);
+          this.labels[a.email] = labels;
         } catch (e) {
           this.handleError(e, a.email, true);
         }
       }),
     );
+  }
+
+  /** Counts unread conversations in Primary and the account's Inbox tabs, as those folders list them. */
+  private async countInbox(email: string) {
+    const tabs = settings.tabsFor(email);
+    // With no tabs, Gmail's own INBOX count is exact.
+    if (!tabs.length) {
+      delete this.inboxUnread[email];
+      return;
+    }
+    const b = this.backend(email);
+    const counts: Record<string, number> = {};
+    try {
+      await Promise.all(
+        ["INBOX", ...tabs].map(async (folder) => {
+          const q = this.queryFor({ kind: "label", label: folder }, email);
+          counts[folder] = await b.countThreads({ labelIds: [...(q.labelIds ?? []), "UNREAD"], q: q.q }, COUNT_MAX);
+        }),
+      );
+      this.inboxUnread[email] = counts;
+    } catch (e) {
+      // Counts are cosmetic: keep the last ones.
+      log.warn("sync", `Couldn't count unread mail for ${email}: ${errorText(e)}`);
+    }
   }
 
   async addAccount(loginHint?: string) {
@@ -903,9 +936,14 @@ class App {
     if (account === ALL) {
       return this.accounts.reduce((n, a) => n + this.unreadCount(a.email, labelId), 0);
     }
-    // Primary's count is Gmail's Personal category (close: it leaves out mail from tabs that are off).
-    const id = labelId === "INBOX" && settings.tabsFor(account).length ? "CATEGORY_PERSONAL" : labelId;
-    const l = this.labels[account]?.find((x) => x.id === id);
+    // Primary and the Inbox tabs: counted from what those folders list.
+    if (labelId === "INBOX" || labelId.startsWith("CATEGORY_")) {
+      const counted = this.inboxUnread[account]?.[labelId];
+      if (counted !== undefined) return counted;
+      // Not counted yet. Gmail's INBOX count is exact when there are no tabs; the rest wait.
+      if (labelId !== "INBOX" || settings.tabsFor(account).length) return 0;
+    }
+    const l = this.labels[account]?.find((x) => x.id === labelId);
     if (labelId === "DRAFT") return l?.total ?? 0;
     return l?.unread ?? 0;
   }

@@ -328,6 +328,11 @@ export class DemoBackend implements MailBackend {
     return { threads: page, nextPageToken: start + size < threads.length ? String(start + size) : undefined };
   }
 
+  async countThreads(query: ListQuery, limit: number): Promise<number> {
+    const r = await this.listThreads({ ...query, pageToken: undefined, maxResults: limit });
+    return r.threads.length;
+  }
+
   private summary(id: string): ThreadSummary {
     const msgs = this.threadMessages(id);
     const real = msgs.filter((m) => !m.labelIds.includes("DRAFT"));

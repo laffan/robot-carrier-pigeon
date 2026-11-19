@@ -50,6 +50,7 @@
     const next = now.includes(tab) ? now.filter((t) => t !== tab) : INBOX_TABS.filter((t) => t === tab || now.includes(t));
     settings.update({ inboxTabs: { ...s.inboxTabs, [email]: next } });
     app.loadList();
+    app.refreshCounts();
   }
 
   /** On a Mac, presets open links in the named app instead of rewriting them. */

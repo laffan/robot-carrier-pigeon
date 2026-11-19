@@ -143,6 +143,8 @@ export interface MailBackend {
   readonly email: string;
   listLabels(withCounts: boolean): Promise<Label[]>;
   listThreads(query: ListQuery, cache?: Map<string, ThreadSummary>): Promise<ListResult>;
+  /** How many conversations match, counting no further than `limit`. */
+  countThreads(query: ListQuery, limit: number): Promise<number>;
   getThread(id: string): Promise<Thread>;
   modifyThreads(ids: string[], add: string[], remove: string[]): Promise<void>;
   modifyMessages(ids: string[], add: string[], remove: string[]): Promise<void>;
