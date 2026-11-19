@@ -8,6 +8,7 @@
   import Popover from "./Popover.svelte";
   import LabelPicker from "./LabelPicker.svelte";
   import type { ThreadSummary } from "../lib/mail/types";
+  import { WHEEL_IDLE, wheelStep } from "../lib/wheel";
 
   interface Props {
     persistentSidebar: boolean;
@@ -21,6 +22,8 @@
   let searchInput = $state<HTMLInputElement>();
   let previousView = $state(app.view);
   let pull = $state(0);
+  /** A pull is following a finger or trackpad gesture (no easing on its height). */
+  let pulling = $state(false);
   let pullStart: number | null = null;
   let moreOpen = $state(false);
   let moreAnchor = $state<HTMLElement>();
@@ -116,10 +119,16 @@
     else app.selection.add(k);
   }
 
+  /** How far the list must be pulled (px) to refresh. */
+  const PULL_REFRESH = 56;
+
   function ontouchstart(e: TouchEvent) {
     // Dragging a pinned row's handle is not a pull to refresh.
     if ((e.target as Element | null)?.closest?.(".handle")) return;
-    if (scroller && scroller.scrollTop <= 0 && !selecting) pullStart = e.touches[0].clientY;
+    if (scroller && scroller.scrollTop <= 0 && !selecting) {
+      pullStart = e.touches[0].clientY;
+      pulling = true;
+    }
   }
   function ontouchmove(e: TouchEvent) {
     if (pullStart == null || drag) return;
@@ -131,9 +140,47 @@
     pull = Math.min(90, dy * 0.45);
   }
   function ontouchend() {
-    if (pull > 56) app.refresh();
+    if (pull > PULL_REFRESH) app.refresh("pull to refresh");
     pull = 0;
     pullStart = null;
+    pulling = false;
+  }
+
+  // Trackpad: a two-finger pull down that starts at the top of the list
+  // (lib/wheel.ts). It refreshes as soon as it passes the threshold, rather
+  // than waiting out the gesture's momentum.
+  let pullGesture = -1;
+  let pullRaw = 0;
+  let pullTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onwheel(e: WheelEvent) {
+    const s = wheelStep(e);
+    if (!s || s.axis !== "y" || !scroller) return;
+    if (s.first) {
+      // Only a gesture that begins at the top: momentum from scrolling up to it doesn't count.
+      if (scroller.scrollTop > 0 || selecting || drag || pullStart != null) return;
+      pullGesture = s.gesture;
+      pullRaw = 0;
+    }
+    if (s.gesture !== pullGesture) return;
+    clearTimeout(pullTimer);
+    pullTimer = setTimeout(endWheelPull, WHEEL_IDLE);
+    if (scroller.scrollTop > 0) return endWheelPull();
+    pullRaw = Math.max(0, pullRaw + s.dy);
+    pulling = pullRaw > 0;
+    pull = Math.min(90, pullRaw * 0.45);
+    if (pull > PULL_REFRESH) {
+      app.refresh("pull to refresh");
+      endWheelPull();
+    }
+  }
+
+  function endWheelPull() {
+    clearTimeout(pullTimer);
+    pullGesture = -1;
+    pullRaw = 0;
+    pulling = false;
+    pull = 0;
   }
 
   /** Opens a row from the Drafts section straight into compose. */
@@ -313,8 +360,8 @@
   {/if}
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="scroll body" bind:this={scroller} {ontouchstart} {ontouchmove} {ontouchend} ontouchcancel={ontouchend}>
-    <div class="pull" style:height="{pull}px" class:ready={pull > 56}>
+  <div class="scroll body" bind:this={scroller} {ontouchstart} {ontouchmove} {ontouchend} ontouchcancel={ontouchend} {onwheel}>
+    <div class="pull" style:height="{pull}px" class:ready={pull > PULL_REFRESH} class:pulling>
       {#if pull > 8}<span class="spinner" style:transform="rotate({pull * 4}deg)"></span>{/if}
     </div>
     {#if app.loading && !app.threads.length}
@@ -461,6 +508,10 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    transition: height 0.2s ease-out;
+  }
+  .pull.pulling {
+    transition: none;
   }
   .pull.ready .spinner {
     border-top-color: var(--accent);

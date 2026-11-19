@@ -96,18 +96,20 @@ iPad builds are not part of the workflow; build those locally with Xcode.
 ### Implemented (Gmail parity)
 
 - **Accounts.** Sign in with Google, for multiple personal and Workspace accounts, with an *All inboxes* view, an account switcher, and a re-sign-in prompt when a token is revoked.
-- **Mailboxes.** Primary, Social, Promotions, Updates, Forums, Pinned, Important, Sent, Drafts, All mail, Spam, Trash and your Gmail labels, with unread counts. Settings › Inbox type switches between Primary and Everything.
+- **Mailboxes.** Primary and the account's other Inbox tabs, Pinned, Important, Sent, Drafts, All mail, Spam, Trash and your Gmail labels, with unread counts.
+- **Inbox tabs.** Settings › Inbox tabs sets, for each account, which of Social, Promotions, Updates and Forums are turned on in Gmail (Gmail › Settings › Inbox › Categories). The default is Gmail's own: Social and Promotions. As in Gmail, Primary is the Inbox without those tabs, so mail from tabs that are off, and mail with no category, stays in Primary. With no tabs, Inbox shows everything. Primary's unread count is Gmail's Personal category, which leaves out mail from tabs that are off.
 - **List.**
   - Pinned conversations sit at the top of every list in a Pinned section, above the Inbox's Drafts section. Pin one with the pin icon on its row or in the conversation's toolbar.
   - A pinned row shows the sender and subject, and in place of the snippet a field for an optional note: a private reminder of why it's pinned, never added to the email. Drag the handle below the pin to reorder pinned conversations.
   - Inbox opens with a Drafts section (latest 5 drafts across the accounts in view, with a link to the rest); tapping one reopens it in compose.
   - Conversations, with participants, message counts, a draft marker, attachment indicator and pin.
-  - Pull to refresh, infinite scroll, and a refresh every 60 seconds while the app is visible.
+  - Pull to refresh (a finger, or two fingers on a trackpad from the top of the list), infinite scroll, and a refresh every 60 seconds while the app is visible.
   - The last list is cached for an instant start.
-- **Swipe actions.** Configurable for each direction: archive, delete, mark read/unread, pin/unpin, or none. Defaults are right = archive and left = delete. Every destructive action shows an **Undo** snackbar.
+- **Swipe actions.** Swipe a row with a finger, or with two fingers on a trackpad (Mac, or an iPad with a trackpad). Configurable for each direction: archive, delete, mark read/unread, pin/unpin, or none. Defaults are left = archive and right = delete. Every destructive action shows an **Undo** snackbar.
 - **Multi-select.** Long-press a row (⌘-click on a Mac). Selected conversations can be archived, deleted, marked read/unread, pinned, moved, reported as spam, or all selected at once.
 - **Conversation view.**
   - Unread messages and the latest message open expanded.
+  - The conversation opens scrolled to its latest message, with the top of that message at the middle of the reading pane (or as far down as the conversation goes).
   - The full header (from, to, cc, date) opens with a tap.
   - Quoted history is collapsed behind `•••`.
   - HTML mail renders in a sandboxed frame and scales down if it's too wide.
@@ -146,6 +148,7 @@ iPad builds are not part of the workflow; build those locally with Xcode.
   | `⌘B` / `⌘I` / `⌘K` / `⌘E` / `⌘⇧X` | Bold / italic / link / code / strikethrough (in the editor) |
 
 - **Appearance.** Light, dark and system themes. Messages always sit on the app background; in dark mode, designed HTML mail is colour-inverted (images kept) so it stays readable. Each account has a colour, shown as a glowing bar at the window's left edge beside its messages (change it in Settings). Two panes on a landscape iPad or a Mac, and a persistent sidebar on wide screens.
+- **Activity console.** The terminal icon beside Settings, at the bottom of the sidebar, opens a console along the bottom of the window with everything the app does: your actions, list loads and refreshes, every mailbox call with its arguments, result and timing, HTTP requests, sign-in, compose and settings changes, and errors. Filter by actions, network or problems; copy or clear the lines; drag the top edge to resize. The log is kept in memory only (the latest 1,500 lines), and tokens and other credentials in URLs are blanked.
 - **Night vision.** The eye between Search and Compose draws the whole app, mail included, in shades of red only (no blue or green light), so your eyes stay adapted to the dark. It works over either theme and stays on until you turn it off. It is drawn as two layers over the window (`lib/nightVision.ts`): one reduces everything to its brightness, the next multiplies that by pure red. System sheets (Google sign-in, the share sheet, the keyboard) are drawn by the OS and keep their colours.
 
 ### Pinning
@@ -190,11 +193,14 @@ Some features can't be built without a server, and some aren't in Gmail's public
 src/
   App.svelte                 layout (1–3 panes), keyboard shortcuts, refresh timer
   components/                Sidebar, ThreadList/Row (swipe), ThreadView, MessageItem,
-                             MailBody (sandboxed HTML), Compose, RecipientField, Settings, …
+                             MailBody (sandboxed HTML), Compose, RecipientField, Settings,
+                             Console (activity log), …
   lib/
     app.svelte.ts            state + mailbox actions (optimistic, undoable)
     compose.svelte.ts        compose/reply/forward/drafts/undo-send
     settings.svelte.ts       persisted preferences
+    log.svelte.ts            activity log behind the console
+    wheel.ts                 trackpad gestures: wheel events grouped and locked to an axis
     nightVision.ts           night vision: the window in red alone
     browser.ts               default browser: rewriting links into browser URL schemes
     platform.ts              Tauri vs browser: HTTP, Keychain, store, files, opener
@@ -204,6 +210,7 @@ src/
       mime.ts                RFC 5322/2047/2231 builder and Gmail payload parser
       markdown.ts            Markdown → inline-styled email HTML
       demo.ts                in-memory backend for browser development
+      logged.ts              logs every mailbox call to the activity log
 src-tauri/
   src/secrets.rs             refresh tokens in the Keychain (macOS/iOS)
   src/files.rs               saving attachments

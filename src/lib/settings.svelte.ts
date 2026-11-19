@@ -1,15 +1,40 @@
 import { kvGet, kvSet } from "./platform";
 import { applyNightVision } from "./nightVision";
+import { log } from "./log.svelte";
 
 export type SwipeAction = "archive" | "trash" | "read" | "pin" | "none";
 
+/** Gmail's category tabs besides Primary, in Gmail's order. */
+export const INBOX_TABS = ["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"] as const;
+export type InboxTab = (typeof INBOX_TABS)[number];
+/** The tabs a Gmail account has out of the box (Updates and Forums are opt-in). */
+export const DEFAULT_TABS: InboxTab[] = ["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS"];
+/** Gmail search names (category:…) of the tabs. */
+export const TAB_SEARCH: Record<InboxTab, string> = {
+  CATEGORY_SOCIAL: "social",
+  CATEGORY_PROMOTIONS: "promotions",
+  CATEGORY_UPDATES: "updates",
+  CATEGORY_FORUMS: "forums",
+};
+
 export interface Settings {
+  /** Finger (or two fingers on a trackpad) moving right across a row. */
   swipeRight: SwipeAction;
+  /** Finger (or two fingers on a trackpad) moving left across a row. */
   swipeLeft: SwipeAction;
   /** Seconds to hold a message before sending; 0 disables undo. */
   undoSendSeconds: number;
-  /** "primary" shows only the Primary category in Inbox, like Gmail's default inbox. */
+  /**
+   * Before per-account tabs: "everything" meant no tabs. Now only the fallback
+   * for accounts without an inboxTabs entry.
+   */
   inboxType: "primary" | "everything";
+  /**
+   * The category tabs turned on in Gmail for each account (keyed by email).
+   * As in Gmail, Primary is the Inbox without those tabs: mail from tabs that
+   * are off stays in Primary. No tabs: the Inbox shows everything.
+   */
+  inboxTabs: Record<string, InboxTab[]>;
   loadRemoteImages: boolean;
   theme: "system" | "light" | "dark";
   /** The app drawn in red alone (lib/nightVision.ts): the list header's eye. */
@@ -25,13 +50,20 @@ export interface Settings {
   browser: string;
   /** URL template used when `browser` is "custom". */
   browserTemplate: string;
+  /** The activity console at the bottom of the window (sidebar toggle). */
+  consoleOpen: boolean;
+  /** Its height in pixels. */
+  consoleHeight: number;
+  /** Bumped when a changed default should reach settings saved earlier (see load). */
+  version: number;
 }
 
 export const DEFAULTS: Settings = {
-  swipeRight: "archive",
-  swipeLeft: "trash",
+  swipeLeft: "archive",
+  swipeRight: "trash",
   undoSendSeconds: 5,
   inboxType: "primary",
+  inboxTabs: {},
   loadRemoteImages: true,
   theme: "system",
   nightVision: false,
@@ -41,6 +73,9 @@ export const DEFAULTS: Settings = {
   signaturesCustomized: {},
   browser: "system",
   browserTemplate: "",
+  consoleOpen: false,
+  consoleHeight: 260,
+  version: 2,
 };
 
 class SettingsStore {
@@ -48,6 +83,11 @@ class SettingsStore {
   loaded = $state(false);
   /** Whether the system currently prefers dark mode. */
   systemDark = $state(false);
+
+  /** The account's Gmail category tabs (see Settings.inboxTabs). */
+  tabsFor(email: string): InboxTab[] {
+    return this.value.inboxTabs[email] ?? (this.value.inboxType === "everything" ? [] : DEFAULT_TABS);
+  }
 
   /** Effective appearance, combining the setting with the system preference. */
   get dark(): boolean {
@@ -65,15 +105,24 @@ class SettingsStore {
 
   async load() {
     const saved = await kvGet<Partial<Settings>>("settings");
-    const merged = { ...DEFAULTS, ...(saved ?? {}) };
+    const merged = { ...DEFAULTS, ...(saved ?? {}), version: DEFAULTS.version };
     // Starring was replaced by pinning.
     for (const k of ["swipeLeft", "swipeRight"] as const) if ((merged[k] as string) === "star") merged[k] = "pin";
+    // Version 2 swapped the swipe defaults to left = archive, right = delete.
+    // Settings saved before then still hold the old defaults; move those over.
+    if (saved && (saved.version ?? 1) < 2 && merged.swipeRight === "archive" && merged.swipeLeft === "trash") {
+      merged.swipeLeft = "archive";
+      merged.swipeRight = "trash";
+    }
     this.value = merged;
+    log.info("settings", `Loaded: swipe left = ${merged.swipeLeft}, swipe right = ${merged.swipeRight}, theme = ${merged.theme}${merged.nightVision ? ", night vision on" : ""}`);
     this.loaded = true;
     this.applyTheme();
   }
 
   async update(patch: Partial<Settings>) {
+    const changed = (Object.keys(patch) as (keyof Settings)[]).filter((k) => patch[k] !== this.value[k] && k !== "consoleHeight");
+    if (changed.length) log.info("settings", changed.map((k) => describe(k, patch[k])).join(", "));
     this.value = { ...this.value, ...patch };
     this.applyTheme();
     await kvSet("settings", $state.snapshot(this.value));
@@ -90,6 +139,15 @@ class SettingsStore {
 }
 
 export const settings = new SettingsStore();
+
+/** One changed setting for the activity log; long values (signatures, colour maps) by name only. */
+function describe(key: keyof Settings, value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const s = String(value);
+    return s.length > 40 ? `${key} changed` : `${key} = ${s}`;
+  }
+  return `${key} changed`;
+}
 
 export const SWIPE_LABELS: Record<SwipeAction, string> = {
   archive: "Archive",

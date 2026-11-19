@@ -278,20 +278,28 @@ export class DemoBackend implements MailBackend {
 
   private matches(msgs: DemoMessage[], q: string): boolean {
     const terms = q.toLowerCase().match(/(\w+:"[^"]*"|\w+:\S+|"[^"]*"|\S+)/g) ?? [];
-    return terms.every((t) => {
-      const [k, ...rest] = t.split(":");
-      const v = rest.join(":").replace(/"/g, "");
-      if (rest.length) {
-        if (k === "is") return v === "unread" ? msgs.some((m) => m.labelIds.includes("UNREAD")) : v === "starred" ? msgs.some((m) => m.labelIds.includes("STARRED")) : v === "pinned" ? msgs.some((m) => m.labelIds.includes("PINNED")) : true;
-        if (k === "from") return msgs.some((m) => `${m.from.name} ${m.from.email}`.toLowerCase().includes(v));
-        if (k === "to") return msgs.some((m) => m.to.some((a) => `${a.name} ${a.email}`.toLowerCase().includes(v)));
-        if (k === "has") return v === "attachment" ? msgs.some((m) => m.attachments.length > 0) : true;
-        if (k === "in" || k === "label") return msgs.some((m) => m.labelIds.some((l) => l.toLowerCase().includes(v)));
-        if (k === "subject") return msgs.some((m) => m.subject.toLowerCase().includes(v));
-      }
-      const needle = t.replace(/"/g, "");
-      return msgs.some((m) => `${m.subject} ${m.from.name} ${m.from.email} ${m.text ?? ""} ${m.html ?? ""}`.toLowerCase().includes(needle));
+    return terms.every((term) => {
+      // "-term" excludes (e.g. -category:social).
+      const negate = term.startsWith("-") && term.length > 1;
+      const t = negate ? term.slice(1) : term;
+      return this.matchTerm(msgs, t) !== negate;
     });
+  }
+
+  private matchTerm(msgs: DemoMessage[], t: string): boolean {
+    const [k, ...rest] = t.split(":");
+    const v = rest.join(":").replace(/"/g, "");
+    if (rest.length) {
+      if (k === "is") return v === "unread" ? msgs.some((m) => m.labelIds.includes("UNREAD")) : v === "starred" ? msgs.some((m) => m.labelIds.includes("STARRED")) : v === "pinned" ? msgs.some((m) => m.labelIds.includes("PINNED")) : true;
+      if (k === "from") return msgs.some((m) => `${m.from.name} ${m.from.email}`.toLowerCase().includes(v));
+      if (k === "to") return msgs.some((m) => m.to.some((a) => `${a.name} ${a.email}`.toLowerCase().includes(v)));
+      if (k === "has") return v === "attachment" ? msgs.some((m) => m.attachments.length > 0) : true;
+      if (k === "in" || k === "label") return msgs.some((m) => m.labelIds.some((l) => l.toLowerCase().includes(v)));
+      if (k === "subject") return msgs.some((m) => m.subject.toLowerCase().includes(v));
+      if (k === "category") return msgs.some((m) => m.labelIds.includes(v === "primary" ? "CATEGORY_PERSONAL" : `CATEGORY_${v.toUpperCase()}`));
+    }
+    const needle = t.replace(/"/g, "");
+    return msgs.some((m) => `${m.subject} ${m.from.name} ${m.from.email} ${m.text ?? ""} ${m.html ?? ""}`.toLowerCase().includes(needle));
   }
 
   async listThreads(query: ListQuery): Promise<ListResult> {

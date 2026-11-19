@@ -7,9 +7,11 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { AuthError, signIn, signOut } from "./mail/auth";
 import { DemoBackend } from "./mail/demo";
 import { GmailBackend } from "./mail/gmail";
+import { logged } from "./mail/logged";
+import { errorText, log, plural, since } from "./log.svelte";
 import type { Label, MailBackend, SendAs, Thread, ThreadSummary } from "./mail/types";
 import { cacheGet, cacheSet, isTauri, kvGet, kvSet } from "./platform";
-import { ACCOUNT_COLORS, settings } from "./settings.svelte";
+import { ACCOUNT_COLORS, settings, TAB_SEARCH } from "./settings.svelte";
 import { toasts } from "./toasts.svelte";
 
 export interface Account {
@@ -111,8 +113,9 @@ class App {
     } else {
       const saved = (await kvGet<Account[]>("accounts")) ?? [];
       this.accounts = saved;
-      for (const a of saved) this.backends.set(a.email, new GmailBackend(a.email));
+      for (const a of saved) this.backends.set(a.email, logged(new GmailBackend(a.email)));
     }
+    log.info("app", this.demo ? "Started with sample mail" : `Started with ${plural(this.accounts.length, "account")}`);
     const last = await kvGet<{ current: string; view: View }>("lastView");
     if (last && (last.current === ALL || this.accounts.some((a) => a.email === last.current))) {
       this.current = last.current;
@@ -133,12 +136,13 @@ class App {
       { email: "work@example.org", name: "Alex Rivera", sendAs: [] },
     ];
     this.backends.clear();
-    this.backends.set("you@example.com", new DemoBackend("you@example.com", "Alex Rivera", 0));
-    this.backends.set("work@example.org", new DemoBackend("work@example.org", "Alex Rivera", 1));
+    this.backends.set("you@example.com", logged(new DemoBackend("you@example.com", "Alex Rivera", 0)));
+    this.backends.set("work@example.org", logged(new DemoBackend("work@example.org", "Alex Rivera", 1)));
   }
 
   /** Opens the app with sample mail (no Google account needed). */
   async startDemo() {
+    log.info("app", "Switched to sample mail");
     this.demo = true;
     await kvSet("demo", true);
     this.loadDemoAccounts();
@@ -151,6 +155,7 @@ class App {
   /** Leaves sample mail and returns to the real (possibly empty) account list. */
   async exitDemo() {
     if (!isTauri) return;
+    log.info("app", "Left sample mail");
     await kvSet("demo", false);
     this.demo = false;
     this.closeThread();
@@ -160,7 +165,7 @@ class App {
     this.summaryCache.clear();
     const saved = (await kvGet<Account[]>("accounts")) ?? [];
     this.accounts = saved;
-    for (const a of saved) this.backends.set(a.email, new GmailBackend(a.email));
+    for (const a of saved) this.backends.set(a.email, logged(new GmailBackend(a.email)));
     this.current = saved.length > 1 ? ALL : (saved[0]?.email ?? ALL);
     this.view = { kind: "label", label: "INBOX" };
     if (saved.length) {
@@ -232,25 +237,29 @@ class App {
   }
 
   async addAccount(loginHint?: string) {
+    log.info("auth", loginHint ? `Signing in again as ${loginHint}` : "Signing in to add an account");
     try {
       const id = await signIn(loginHint);
+      log.info("auth", `Signed in as ${id.email}`);
       if (this.demo && isTauri) await this.exitDemo();
       const existing = this.accounts.findIndex((a) => a.email === id.email);
       const acct: Account = { email: id.email, name: id.name, picture: id.picture, sendAs: [] };
       if (existing >= 0) this.accounts[existing] = { ...this.accounts[existing], ...acct, needsReauth: false };
       else this.accounts = [...this.accounts, acct];
-      this.backends.set(id.email, new GmailBackend(id.email));
+      this.backends.set(id.email, logged(new GmailBackend(id.email)));
       await this.persistAccounts();
       if (existing < 0) this.switchAccount(id.email);
       else this.loadList();
       this.refreshAccounts();
       toasts.show(`Signed in as ${id.email}`);
     } catch (e) {
+      log.warn("auth", `Sign-in failed: ${errorText(e)}`);
       toasts.error(e instanceof Error ? e.message : String(e));
     }
   }
 
   async removeAccount(email: string) {
+    log.info("auth", `Removing ${email}`);
     await signOut(email).catch(() => {});
     this.accounts = this.accounts.filter((a) => a.email !== email);
     this.backends.delete(email);
@@ -267,6 +276,7 @@ class App {
       const email = e.account || account!;
       const idx = this.accounts.findIndex((a) => a.email === email);
       if (idx >= 0 && !this.accounts[idx].needsReauth) {
+        log.warn("auth", `${email} needs to sign in again: ${e.message}`);
         this.accounts[idx] = { ...this.accounts[idx], needsReauth: true };
         toasts.show(`${email} needs to sign in again`, {
           action: "Sign in",
@@ -276,8 +286,12 @@ class App {
       }
       return;
     }
+    // Toasted errors reach the log through toasts.error.
     if (!quiet) toasts.error(e instanceof Error ? e.message : String(e));
-    else console.warn(e);
+    else {
+      log.warn("error", `${account ? account + ": " : ""}${errorText(e)}`);
+      console.warn(e);
+    }
   }
 
   // ---- views --------------------------------------------------------------
@@ -290,7 +304,7 @@ class App {
     if (this.view.kind === "search") return this.view.q;
     const l = this.view.label;
     if (l === "INBOX" && this.current === ALL) return "All inboxes";
-    if (l === "INBOX" && settings.value.inboxType === "primary") return "Primary";
+    if (l === "INBOX" && settings.tabsFor(this.current).length) return "Primary";
     if (SYSTEM_NAMES[l]) return SYSTEM_NAMES[l];
     const found = this.labels[this.current]?.find((x) => x.id === l);
     return found ? found.name.split("/").pop()! : l;
@@ -306,11 +320,16 @@ class App {
     return l === "INBOX" || (l?.startsWith("CATEGORY_") ?? false);
   }
 
-  private queryFor(view: View): { labelIds?: string[]; q?: string } {
+  /** The Gmail query for a view in one account. */
+  private queryFor(view: View, account: string): { labelIds?: string[]; q?: string } {
     if (view.kind === "search") return { q: view.q };
     const l = view.label;
     if (l === "INBOX") {
-      return { labelIds: settings.value.inboxType === "primary" ? ["INBOX", "CATEGORY_PERSONAL"] : ["INBOX"] };
+      // Gmail's Primary tab is the Inbox without the account's other tabs, so
+      // mail from tabs that are off (and mail with no category) stays in it.
+      // Gmail's CATEGORY_PERSONAL label alone would leave those out.
+      const tabs = settings.tabsFor(account);
+      return tabs.length ? { labelIds: ["INBOX"], q: tabs.map((t) => `-category:${TAB_SEARCH[t]}`).join(" ") } : { labelIds: ["INBOX"] };
     }
     if (l.startsWith("CATEGORY_")) return { labelIds: ["INBOX", l] };
     if (l === "ALL") return {};
@@ -323,6 +342,7 @@ class App {
 
   setView(view: View) {
     this.view = view;
+    log.info("action", `Show ${this.viewTitle}${this.current === ALL ? "" : ` (${this.current})`}`);
     this.selection.clear();
     this.closeThread();
     this.sidebarOpen = false;
@@ -331,6 +351,7 @@ class App {
   }
 
   switchAccount(email: string) {
+    log.info("action", `Switch to ${email === ALL ? "all accounts" : email}`);
     this.current = email;
     if (email === ALL) this.view = { kind: "label", label: "INBOX" };
     else if (this.view.kind === "label" && !SYSTEM_NAMES[this.view.label]) this.view = { kind: "label", label: "INBOX" };
@@ -381,6 +402,7 @@ class App {
 
   async loadList() {
     const gen = ++this.generation;
+    const start = performance.now();
     this.listError = null;
     if (!this.showsDrafts) this.drafts = [];
     this.loadDrafts();
@@ -397,8 +419,10 @@ class App {
       if (gen !== this.generation) return;
       this.threads = fresh;
       cacheSet(this.cacheKey(), fresh.slice(0, PAGE));
+      log.info("sync", `Loaded ${this.viewTitle}: ${plural(fresh.length, "conversation")}${cached?.length ? " (shown from cache first)" : ""} · ${since(start)}`);
     } catch (e) {
       if (gen !== this.generation) return;
+      log.error("sync", `Couldn't load ${this.viewTitle}: ${errorText(e)}`);
       this.listError = e instanceof Error ? e.message : String(e);
       this.handleError(e, undefined, true);
     } finally {
@@ -410,13 +434,13 @@ class App {
   }
 
   private async fetchFirstPages(): Promise<ThreadSummary[]> {
-    const query = this.queryFor(this.view);
     const accounts = this.accountsInView.filter((a) => !this.account(a)?.needsReauth);
-    // Pinned conversations are fetched separately so they show even when older than the first page.
-    const pinnedQuery = this.showsPinned ? { ...query, labelIds: [...(query.labelIds ?? []), "PINNED"], maxResults: PINNED_MAX } : null;
     const results = await Promise.allSettled(
       accounts.map(async (email) => {
         const b = this.backend(email);
+        const query = this.queryFor(this.view, email);
+        // Pinned conversations are fetched separately so they show even when older than the first page.
+        const pinnedQuery = this.showsPinned ? { ...query, labelIds: [...(query.labelIds ?? []), "PINNED"], maxResults: PINNED_MAX } : null;
         const [r, pinned] = await Promise.all([
           b.listThreads({ ...query, maxResults: PAGE }, this.summaries(email)),
           pinnedQuery ? b.listThreads(pinnedQuery, this.summaries(email)).then((x) => x.threads) : [],
@@ -443,14 +467,22 @@ class App {
     return this.sortThreads(out);
   }
 
-  /** Pull-to-refresh / periodic refresh: keeps already-loaded pages. */
-  async refresh() {
-    if (this.refreshing || this.loading || !this.accounts.length) return;
+  /** Pull-to-refresh / periodic refresh: keeps already-loaded pages. `reason` is for the activity log. */
+  async refresh(reason = "refresh") {
+    if (this.refreshing || this.loading || !this.accounts.length) {
+      log.debug("sync", `Refresh (${reason}) skipped: already loading`);
+      return;
+    }
     const gen = this.generation;
+    const start = performance.now();
     this.refreshing = true;
+    log.info("sync", `Refreshing ${this.viewTitle} (${reason})`);
     try {
       const fresh = await this.fetchFirstPages();
       if (gen !== this.generation) return;
+      const known = new Set(this.threads.map(threadKey));
+      const added = fresh.filter((t) => !known.has(threadKey(t))).length;
+      log.info("sync", `Refreshed ${this.viewTitle}: ${plural(fresh.length, "conversation")}, ${added} new to the list · ${since(start)}`);
       const seen = new Set(fresh.map(threadKey));
       const unpinned = fresh.filter((t) => !t.pinned);
       const oldest = unpinned.length ? unpinned[unpinned.length - 1].date : Infinity;
@@ -461,6 +493,7 @@ class App {
       this.loadDrafts();
       if (this.open && this.thread) this.reloadThread();
     } catch (e) {
+      log.error("sync", `Refresh failed: ${errorText(e)}`);
       this.handleError(e, undefined, true);
     } finally {
       if (gen === this.generation) this.refreshing = false;
@@ -472,12 +505,11 @@ class App {
     const gen = this.generation;
     this.loadingMore = true;
     try {
-      const query = this.queryFor(this.view);
       const accounts = this.accountsInView.filter((a) => this.pageTokens.get(a));
       const pages = await Promise.all(
         accounts.map(async (email) => {
           const r = await this.backend(email).listThreads(
-            { ...query, maxResults: PAGE, pageToken: this.pageTokens.get(email) },
+            { ...this.queryFor(this.view, email), maxResults: PAGE, pageToken: this.pageTokens.get(email) },
             this.summaries(email),
           );
           this.pageTokens.set(email, r.nextPageToken);
@@ -487,6 +519,7 @@ class App {
       if (gen !== this.generation) return;
       const seen = new Set(this.threads.map(threadKey));
       const more = pages.flat().filter((t) => !seen.has(threadKey(t)));
+      log.info("sync", `Loaded ${plural(more.length, "more conversation")} in ${this.viewTitle}`);
       this.threads = this.sortThreads([...this.threads, ...more]);
       this.hasMore = this.accountsInView.some((a) => this.pageTokens.get(a));
     } catch (e) {
@@ -530,6 +563,7 @@ class App {
     const moved = new Set(keys);
     let i = 0;
     this.pinOrder = order.map((k) => (moved.has(k) ? keys[i++] : k));
+    log.info("action", `Reordered ${plural(keys.length, "pinned conversation")}`);
     this.threads = this.sortThreads([...this.threads]);
     this.savePins();
   }
@@ -537,15 +571,18 @@ class App {
   // ---- conversation -------------------------------------------------------
 
   async openThread(t: { account: string; id: string }) {
+    const start = performance.now();
     this.open = { account: t.account, id: t.id };
     this.threadError = null;
     this.thread = null;
     this.threadLoading = true;
     const summary = this.threads.find((x) => x.account === t.account && x.id === t.id);
+    log.info("action", `Open “${summary?.subject || t.id}” (${t.account})`);
     try {
       const thread = await this.backend(t.account).getThread(t.id);
       if (this.open?.id !== t.id) return;
       this.thread = thread;
+      log.info("action", `Opened “${thread.subject || "(no subject)"}”: ${plural(thread.messages.length, "message")} · ${since(start)}`);
       if (summary?.unread || thread.messages.some((m) => m.labelIds.includes("UNREAD"))) {
         this.patchLocal([threadKey(t)], [], ["UNREAD"]);
         this.backend(t.account)
@@ -555,6 +592,7 @@ class App {
       }
     } catch (e) {
       if (this.open?.id !== t.id) return;
+      log.error("action", `Couldn't open conversation: ${errorText(e)}`);
       this.threadError = e instanceof Error ? e.message : String(e);
       this.handleError(e, t.account, true);
     } finally {
@@ -574,6 +612,7 @@ class App {
   }
 
   closeThread() {
+    if (this.open) log.debug("action", "Close conversation");
     this.open = null;
     this.thread = null;
     this.threadError = null;
@@ -646,6 +685,7 @@ class App {
    */
   async modify(keys: string[], add: string[], remove: string[], message?: string, undoable = true) {
     if (!keys.length) return;
+    log.debug("mail", `Labels on ${plural(keys.length, "conversation")}: ${[...add.map((l) => "+" + l), ...remove.map((l) => "−" + l)].join(" ")}`);
     const before = this.threads;
     const prevLabels = new Map(before.filter((t) => keys.includes(threadKey(t))).map((t) => [threadKey(t), t.labelIds]));
     this.patchLocal(keys, add, remove);
@@ -671,6 +711,7 @@ class App {
         action: undoable ? "Undo" : undefined,
         onAction: undoable
           ? async () => {
+              log.info("action", `Undo: ${message}`);
               // Restore each thread's exact previous labels.
               this.threads = before.map((t) => (prevLabels.has(threadKey(t)) ? { ...t, labelIds: prevLabels.get(threadKey(t))! } : t));
               try {
@@ -687,7 +728,14 @@ class App {
     }
   }
 
+  /** One line in the activity log for a mailbox action. */
+  private act(verb: string, keys: string[]) {
+    const one = keys.length === 1 ? this.threads.find((t) => threadKey(t) === keys[0]) : undefined;
+    log.info("action", `${verb} ${one ? `“${one.subject || "(no subject)"}”` : plural(keys.length, "conversation")}`);
+  }
+
   archive(keys: string[]) {
+    this.act("Archive", keys);
     const n = keys.length;
     return this.modify(keys, [], ["INBOX"], n > 1 ? `${n} archived` : "Archived");
   }
@@ -695,6 +743,7 @@ class App {
   async trash(keys: string[]) {
     if (!keys.length) return;
     if (this.viewLabel === "TRASH") return this.deleteForever(keys);
+    this.act("Delete", keys);
     const before = this.threads;
     this.threads = this.threads.filter((t) => !keys.includes(threadKey(t)));
     this.advanceFrom(keys, before);
@@ -711,6 +760,7 @@ class App {
     toasts.show(n > 1 ? `${n} moved to Trash` : "Moved to Trash", {
       action: "Undo",
       onAction: async () => {
+        log.info("action", `Undo: delete ${plural(n, "conversation")}`);
         this.threads = before;
         try {
           await Promise.all([...this.byAccount(keys)].map(([a, ids]) => this.backend(a).untrashThreads(ids)));
@@ -725,6 +775,7 @@ class App {
   async deleteForever(keys: string[]) {
     if (!keys.length) return;
     if (!confirm(keys.length > 1 ? `Delete ${keys.length} conversations forever?` : "Delete this conversation forever?")) return;
+    this.act("Delete forever", keys);
     const before = this.threads;
     this.threads = this.threads.filter((t) => !keys.includes(threadKey(t)));
     this.advanceFrom(keys, before);
@@ -742,6 +793,7 @@ class App {
   async emptyFolder(label: "TRASH" | "SPAM") {
     if (this.current === ALL) return;
     if (!confirm(`Delete everything in ${SYSTEM_NAMES[label]} forever?`)) return;
+    log.info("action", `Empty ${SYSTEM_NAMES[label]} (${this.current})`);
     const b = this.backend(this.current);
     try {
       let token: string | undefined;
@@ -761,6 +813,7 @@ class App {
   }
 
   setRead(keys: string[], read: boolean) {
+    this.act(read ? "Mark read" : "Mark unread", keys);
     return read ? this.modify(keys, [], ["UNREAD"], undefined, false) : this.modify(keys, ["UNREAD"], [], undefined, false);
   }
 
@@ -774,12 +827,14 @@ class App {
   async markOpenUnread() {
     if (!this.open) return;
     const key = threadKey(this.open);
+    this.act("Mark unread", [key]);
     this.closeThread();
     await this.modify([key], ["UNREAD"], []);
   }
 
   /** Pins or unpins conversations (a thread-wide label, so it survives new replies). */
   setPin(keys: string[], on: boolean) {
+    this.act(on ? "Pin" : "Unpin", keys);
     // Newly pinned conversations go to the top; notes are kept in case of a re-pin.
     this.pinOrder = [...(on ? keys : []), ...this.pinOrder.filter((k) => !keys.includes(k))];
     this.savePins();
@@ -793,14 +848,17 @@ class App {
   }
 
   reportSpam(keys: string[]) {
+    this.act("Report spam", keys);
     return this.modify(keys, ["SPAM"], ["INBOX"], keys.length > 1 ? `${keys.length} reported as spam` : "Reported as spam");
   }
 
   notSpam(keys: string[]) {
+    this.act("Not spam", keys);
     return this.modify(keys, ["INBOX"], ["SPAM"], "Moved to Inbox");
   }
 
   async restoreFromTrash(keys: string[]) {
+    this.act("Restore", keys);
     const before = this.threads;
     this.threads = this.threads.filter((t) => !keys.includes(threadKey(t)));
     this.advanceFrom(keys, before);
@@ -816,6 +874,7 @@ class App {
   }
 
   moveToInbox(keys: string[]) {
+    this.act("Move to Inbox", keys);
     return this.modify(keys, ["INBOX"], [], "Moved to Inbox");
   }
 
@@ -828,6 +887,7 @@ class App {
     }
     if (target === "INBOX") return this.modify(keys, ["INBOX"], remove.filter((x) => x !== "INBOX"), "Moved to Inbox");
     const name = SYSTEM_NAMES[target] ?? this.labelName(splitKey(keys[0]).account, target);
+    this.act(`Move to ${name}:`, keys);
     return this.modify(keys, [target], remove, `Moved to ${name}`);
   }
 
@@ -843,7 +903,8 @@ class App {
     if (account === ALL) {
       return this.accounts.reduce((n, a) => n + this.unreadCount(a.email, labelId), 0);
     }
-    const id = labelId === "INBOX" && settings.value.inboxType === "primary" ? "CATEGORY_PERSONAL" : labelId;
+    // Primary's count is Gmail's Personal category (close: it leaves out mail from tabs that are off).
+    const id = labelId === "INBOX" && settings.tabsFor(account).length ? "CATEGORY_PERSONAL" : labelId;
     const l = this.labels[account]?.find((x) => x.id === id);
     if (labelId === "DRAFT") return l?.total ?? 0;
     return l?.unread ?? 0;
@@ -851,7 +912,7 @@ class App {
 
   /** Called after sending or saving a draft to keep lists in sync. */
   afterSend() {
-    if (this.viewLabel === "SENT" || this.viewLabel === "DRAFT" || this.view.kind === "search") this.refresh();
+    if (this.viewLabel === "SENT" || this.viewLabel === "DRAFT" || this.view.kind === "search") this.refresh("after sending");
     this.loadDrafts();
     if (this.open) this.reloadThread();
     this.refreshCounts();

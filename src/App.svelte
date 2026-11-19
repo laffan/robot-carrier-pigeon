@@ -10,6 +10,9 @@
   import ThreadList from "./components/ThreadList.svelte";
   import ThreadView from "./components/ThreadView.svelte";
   import Toasts from "./components/Toasts.svelte";
+  import Console from "./components/Console.svelte";
+  import { settings } from "./lib/settings.svelte";
+  import { captureGlobalErrors } from "./lib/log.svelte";
 
   let width = $state(typeof window !== "undefined" ? window.innerWidth : 1024);
   let settingsOpen = $state(false);
@@ -27,6 +30,7 @@
   });
 
   onMount(() => {
+    captureGlobalErrors();
     app.init();
     const onResize = () => (width = window.innerWidth);
     // Shrink sheets above the on-screen keyboard (iPad).
@@ -40,9 +44,9 @@
 
     // Keep the mailbox fresh while the app is in front.
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") app.refresh();
+      if (document.visibilityState === "visible") app.refresh("every 60 s");
     }, 60_000);
-    const onVisible = () => document.visibilityState === "visible" && app.refresh();
+    const onVisible = () => document.visibilityState === "visible" && app.refresh("app in front");
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("keydown", onKey);
     return () => {
@@ -204,6 +208,10 @@
   <Settings onclose={() => (settingsOpen = false)} />
 {/if}
 
+{#if app.ready && settings.value.consoleOpen}
+  <Console />
+{/if}
+
 <Toasts />
 
 <style>
@@ -213,9 +221,10 @@
     align-items: center;
     justify-content: center;
   }
+  /* The activity console (components/Console.svelte) sets --console-h while open. */
   .shell {
     display: flex;
-    height: 100%;
+    height: calc(100% - var(--console-h, 0px));
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
   }
@@ -245,7 +254,7 @@
   }
   .fullreader {
     position: fixed;
-    inset: 0;
+    inset: 0 0 var(--console-h, 0px) 0;
     z-index: 20;
     background: var(--bg);
     padding-left: var(--safe-left);
@@ -260,7 +269,7 @@
   }
   .drawer-scrim {
     position: fixed;
-    inset: 0;
+    inset: 0 0 var(--console-h, 0px) 0;
     background: rgba(0, 0, 0, 0.22);
     z-index: 40;
     animation: fade 0.18s;
@@ -268,7 +277,7 @@
   .drawer {
     position: fixed;
     top: 0;
-    bottom: 0;
+    bottom: var(--console-h, 0px);
     left: 0;
     width: min(300px, 84vw);
     z-index: 41;

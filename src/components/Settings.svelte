@@ -1,9 +1,9 @@
 <script lang="ts">
   import { X } from "@lucide/svelte";
-  import { app } from "../lib/app.svelte";
+  import { app, SYSTEM_NAMES } from "../lib/app.svelte";
   import { composer, htmlToMarkdown } from "../lib/compose.svelte";
   import { markdownToHtml } from "../lib/mail/markdown";
-  import { ACCOUNT_COLORS, settings, SWIPE_LABELS, type SwipeAction } from "../lib/settings.svelte";
+  import { ACCOUNT_COLORS, INBOX_TABS, settings, SWIPE_LABELS, type InboxTab, type SwipeAction } from "../lib/settings.svelte";
   import Sheet from "./Sheet.svelte";
   import { isIOS, isTauri } from "../lib/platform";
   import { applyTemplate, BROWSERS, CUSTOM_BROWSER, validTemplate } from "../lib/browser";
@@ -43,6 +43,14 @@
   }
 
   const swipeOptions: SwipeAction[] = ["archive", "trash", "read", "pin", "none"];
+
+  /** Turns one of an account's Gmail tabs on or off, then reloads the list. */
+  function toggleTab(email: string, tab: InboxTab) {
+    const now = settings.tabsFor(email);
+    const next = now.includes(tab) ? now.filter((t) => t !== tab) : INBOX_TABS.filter((t) => t === tab || now.includes(t));
+    settings.update({ inboxTabs: { ...s.inboxTabs, [email]: next } });
+    app.loadList();
+  }
 
   /** On a Mac, presets open links in the named app instead of rewriting them. */
   const mac = isTauri && !isIOS;
@@ -121,32 +129,42 @@
 
     <section>
       <h2>Swipe actions</h2>
-      <label class="row">
-        <span class="grow">Swipe right</span>
-        <select value={s.swipeRight} onchange={(e) => settings.update({ swipeRight: e.currentTarget.value as SwipeAction })}>
-          {#each swipeOptions as o}<option value={o}>{SWIPE_LABELS[o]}</option>{/each}
-        </select>
-      </label>
+      <p class="note">Swipe a conversation in the list with a finger, or with two fingers on a trackpad.</p>
       <label class="row">
         <span class="grow">Swipe left</span>
         <select value={s.swipeLeft} onchange={(e) => settings.update({ swipeLeft: e.currentTarget.value as SwipeAction })}>
           {#each swipeOptions as o}<option value={o}>{SWIPE_LABELS[o]}</option>{/each}
         </select>
       </label>
+      <label class="row">
+        <span class="grow">Swipe right</span>
+        <select value={s.swipeRight} onchange={(e) => settings.update({ swipeRight: e.currentTarget.value as SwipeAction })}>
+          {#each swipeOptions as o}<option value={o}>{SWIPE_LABELS[o]}</option>{/each}
+        </select>
+      </label>
+    </section>
+
+    <section>
+      <h2>Inbox tabs</h2>
+      <p class="note">
+        Turn on the tabs each account uses in Gmail (Gmail › Settings › Inbox › Categories). As in Gmail, Primary holds everything the
+        other tabs don't, and with no tabs Inbox shows everything.
+      </p>
+      {#each app.accounts as a (a.email)}
+        {@const tabs = settings.tabsFor(a.email)}
+        <div class="tabs-row">
+          <span class="ellipsis">{a.email}</span>
+          <div class="chips" role="group" aria-label="Inbox tabs for {a.email}">
+            {#each INBOX_TABS as t (t)}
+              <button class="chip" class:on={tabs.includes(t)} aria-pressed={tabs.includes(t)} onclick={() => toggleTab(a.email, t)}>{SYSTEM_NAMES[t]}</button>
+            {/each}
+          </div>
+        </div>
+      {/each}
     </section>
 
     <section>
       <h2>Mail</h2>
-      <label class="row">
-        <span class="grow">
-          Inbox type
-          <span class="sub">Primary hides Social, Promotions, Updates and Forums from Inbox.</span>
-        </span>
-        <select value={s.inboxType} onchange={(e) => { settings.update({ inboxType: e.currentTarget.value as "primary" | "everything" }); app.loadList(); }}>
-          <option value="primary">Primary</option>
-          <option value="everything">Everything</option>
-        </select>
-      </label>
       <label class="row">
         <span class="grow">Default reply</span>
         <select value={s.defaultReply} onchange={(e) => settings.update({ defaultReply: e.currentTarget.value as "reply" | "replyAll" })}>
@@ -306,6 +324,38 @@
   }
   .warn {
     color: var(--danger);
+  }
+  .tabs-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 12px;
+    padding: 8px 0;
+    font-size: 14px;
+  }
+  .ellipsis {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .chip {
+    padding: 4px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .chip.on {
+    background: var(--text);
+    border-color: var(--text);
+    color: var(--bg);
   }
   .add {
     margin: 4px 0 0 -12px;

@@ -11,6 +11,9 @@ import { settings } from "./settings.svelte";
 import { toasts } from "./toasts.svelte";
 import { contacts } from "./contacts.svelte";
 import { fullDate, replyHeader } from "./util";
+import { errorText, log, plural } from "./log.svelte";
+
+const MODE_NAMES: Record<ComposeMode, string> = { new: "New message", reply: "Reply", replyAll: "Reply all", forward: "Forward", draft: "Draft" };
 
 export type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "draft";
 
@@ -150,6 +153,7 @@ class Composer {
   private async begin(d: Omit<Draft, "signature" | "includeSignature">, inline = false) {
     if (this.draft) await this.close();
     const signature = await this.signatureFor(d.from.email);
+    log.info("compose", `${MODE_NAMES[d.mode]}${inline ? " (inline)" : ""} from ${d.from.email}${d.subject ? ` · “${d.subject}”` : ""}`);
     this.inline = inline;
     this.savedMessageIds = [];
     this.draft = { ...d, signature, includeSignature: true };
@@ -283,6 +287,7 @@ class Composer {
       }
       const isReply = !!message.references || threadId !== message.id;
       if (this.draft) await this.close();
+      log.info("compose", `Open draft “${message.subject || "(no subject)"}” (${account})`);
       this.inline = false;
       this.savedMessageIds = [];
       this.draft = {
@@ -329,6 +334,7 @@ class Composer {
 
   /** Moves an inline reply or forward into the compose sheet. */
   popOut() {
+    log.debug("compose", "Moved the reply into a window");
     this.inline = false;
   }
 
@@ -443,7 +449,9 @@ class Composer {
         }
         if (this.hash() === hash) this.savedHash = hash;
         this.lastSaved = Date.now();
+        log.info("compose", `Draft saved (${ref.draftId})`);
       } catch (e) {
+        log.warn("compose", `Draft not saved: ${errorText(e)}`);
         app.handleError(e, snapshot.account, true);
       } finally {
         this.saving = false;
@@ -467,6 +475,7 @@ class Composer {
         this.closing = false;
       }
       if (this.draft === d) this.draft = null;
+      log.info("compose", "Closed; kept in Drafts");
       toasts.show("Saved to Drafts");
       app.afterSend();
     } else this.draft = null;
@@ -478,6 +487,7 @@ class Composer {
     clearTimeout(this.saveTimer);
     if (this.savePromise) await this.savePromise;
     const id = this.draft?.draftId ?? d.draftId;
+    log.info("compose", "Discard draft");
     this.draft = null;
     if (id) {
       try {
@@ -513,11 +523,14 @@ class Composer {
     this.draft = null;
     const go = () => this.deliver(snapshot, raw, wasInline);
     const secs = settings.value.undoSendSeconds;
+    const n = snapshot.to.length + snapshot.cc.length + snapshot.bcc.length;
+    log.info("compose", `Send “${snapshot.subject || "(no subject)"}” to ${plural(n, "recipient")}${snapshot.attachments.length ? `, ${plural(snapshot.attachments.length, "attachment")}` : ""}${secs > 0 ? ` in ${secs} s (undo send)` : ""}`);
     if (secs > 0) {
       toasts.show("Sending…", {
         action: "Undo",
         duration: secs * 1000,
         onAction: async () => {
+          log.info("compose", "Undo send: message reopened");
           if (this.draft) await this.close();
           this.inline = this.restoreInline(snapshot, wasInline);
           this.draft = snapshot;
@@ -537,6 +550,7 @@ class Composer {
         kvDelete(`draftbody:${d.draftId}`);
       }
       contacts.remember([...d.to, ...d.cc, ...d.bcc]);
+      log.info("compose", `Sent “${d.subject || "(no subject)"}”`);
       toasts.show("Message sent");
       app.afterSend();
     } catch (e) {

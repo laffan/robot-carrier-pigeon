@@ -5,6 +5,7 @@
  * a Google account.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { errorText, log, redactUrl, since } from "./log.svelte";
 
 export const isTauri: boolean =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -12,12 +13,22 @@ export const isTauri: boolean =
 export const isApple: boolean =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
 
+/** HTTP for the app; each request shows in the activity log (credentials blanked). */
 export async function httpFetch(input: string, init?: RequestInit): Promise<Response> {
-  if (isTauri) {
-    const { fetch } = await import("@tauri-apps/plugin-http");
-    return fetch(input, init);
+  const start = performance.now();
+  const what = `${(init?.method ?? "GET").toUpperCase()} ${redactUrl(input)}`;
+  try {
+    let res: Response;
+    if (isTauri) {
+      const { fetch } = await import("@tauri-apps/plugin-http");
+      res = await fetch(input, init);
+    } else res = await fetch(input, init);
+    log.add(res.ok ? "debug" : "warn", "net", `${what} ${res.status} · ${since(start)}`);
+    return res;
+  } catch (e) {
+    log.error("net", `${what} failed: ${errorText(e)} · ${since(start)}`);
+    throw e;
   }
-  return fetch(input, init);
 }
 
 // ---- secrets (Keychain on Apple platforms) -------------------------------

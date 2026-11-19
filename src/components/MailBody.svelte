@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import DOMPurify from "dompurify";
   import { Ellipsis } from "@lucide/svelte";
   import { textToHtml } from "../lib/mail/mime";
@@ -164,13 +165,20 @@
     height = Math.max(20, h);
   }
 
+  /** Watches the loaded document's height; replaced on each load and dropped with the frame. */
+  let resize: ResizeObserver | undefined;
+  onDestroy(() => resize?.disconnect());
+
   function onload() {
     const doc = frame?.contentDocument;
     if (!doc) return;
     doc.documentElement.classList.toggle("show-quoted", showQuoted);
     measure();
-    const ro = new ResizeObserver(() => measure());
-    ro.observe(doc.documentElement);
+    // A frame that's gone (or reloaded with new content) must not stay
+    // observed: Chromium then reports a ResizeObserver loop on every frame.
+    resize?.disconnect();
+    resize = new ResizeObserver(() => measure());
+    resize.observe(doc.documentElement);
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", measure));
     doc.addEventListener("click", (e) => {
       const a = (e.target as Element)?.closest?.("a");

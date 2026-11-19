@@ -1,3 +1,5 @@
+import { log } from "./log.svelte";
+
 export interface Toast {
   id: number;
   message: string;
@@ -32,6 +34,7 @@ class Toasts {
   }
 
   error(message: string) {
+    log.error("error", message);
     const id = ++this.seq;
     this.items = [...this.items, { id, message, error: true }];
     this.timers.set(id, setTimeout(() => this.dismiss(id), 5000));

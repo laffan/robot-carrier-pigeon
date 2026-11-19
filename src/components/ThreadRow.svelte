@@ -3,6 +3,7 @@
   import type { ThreadSummary } from "../lib/mail/types";
   import type { SwipeAction } from "../lib/settings.svelte";
   import { listDate } from "../lib/util";
+  import { WHEEL_IDLE, wheelStep } from "../lib/wheel";
 
   interface Props {
     thread: ThreadSummary;
@@ -80,10 +81,15 @@
         row.setPointerCapture(e.pointerId);
       } else return;
     }
-    const dir = mx > 0 ? swipeRight : swipeLeft;
-    // Resist when there's no action for this direction.
-    dx = dir === "none" ? mx * 0.15 : mx;
+    follow(mx);
     e.preventDefault();
+  }
+
+  /** Moves the row with the finger(s); resists when there's no action for that direction. */
+  function follow(mx: number) {
+    const dir = mx > 0 ? swipeRight : swipeLeft;
+    const width = row?.offsetWidth ?? 400;
+    dx = Math.max(-width, Math.min(width, dir === "none" ? mx * 0.15 : mx));
   }
 
   function finish() {
@@ -94,6 +100,39 @@
     }
     phase = "idle";
     suppressClick = true;
+    release();
+  }
+
+  // ---- trackpad: two-finger swipes arrive as wheel events (lib/wheel.ts) ----
+
+  /** The gesture this row is following, and how far it has moved. */
+  let wheelGesture = -1;
+  let wheelX = 0;
+  let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onwheel(e: WheelEvent) {
+    const s = wheelStep(e);
+    if (!s || s.axis !== "x") return;
+    // Sideways gestures belong to the rows: no sideways scrolling or back-swipe.
+    e.preventDefault();
+    if (s.first) {
+      if (selecting || animating || collapsing || phase !== "idle") return;
+      wheelGesture = s.gesture;
+      wheelX = 0;
+    }
+    if (s.gesture !== wheelGesture) return;
+    wheelX += s.dx;
+    follow(wheelX);
+    // The gesture (momentum included) has ended when the events stop.
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      wheelGesture = -1;
+      release();
+    }, WHEEL_IDLE);
+  }
+
+  /** The swipe is over: carry out the armed action, or spring back. */
+  function release() {
     const a = action;
     animating = true;
     if (armed) {
@@ -156,7 +195,6 @@
     class:on={thread.pinned}
     aria-label={thread.pinned ? "Unpin" : "Pin"}
     title={thread.pinned ? "Unpin" : "Pin to top"}
-    onpointerdown={(e) => e.stopPropagation()}
     onclick={(e) => {
       e.stopPropagation();
       onpin();
@@ -166,9 +204,12 @@
   </button>
 {/snippet}
 
+<!-- The wrapper takes trackpad swipes: the row slides out from under a pointer that stays put. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="wrap"
   class:collapsing
+  {onwheel}
   style:--bgc={action === "archive" ? "var(--swipe-archive)" : action === "trash" ? "var(--swipe-trash)" : action === "read" ? "var(--swipe-read)" : action === "pin" ? "var(--swipe-pin)" : "var(--bg-3)"}
 >
   <span class="pill" style:--c={color} aria-hidden="true"></span>

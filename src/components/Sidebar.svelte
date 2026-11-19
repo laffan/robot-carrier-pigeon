@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Plus, Settings as Gear, CircleAlert } from "@lucide/svelte";
+  import { ChevronDown, Plus, Settings as Gear, CircleAlert, SquareTerminal } from "@lucide/svelte";
   import { app, ALL, SYSTEM_NAMES } from "../lib/app.svelte";
   import { settings } from "../lib/settings.svelte";
 
@@ -14,10 +14,12 @@
   const focus = $derived(app.current === ALL ? (app.accounts[0]?.email ?? "") : app.current);
   const focusAccount = $derived(app.account(focus));
 
-  const primary = $derived(settings.value.inboxType === "primary");
+  /** The account's Gmail tabs besides Primary (Settings › Inbox tabs). */
+  const tabs = $derived(settings.tabsFor(focus));
+  const primary = $derived(tabs.length > 0);
   const folders = $derived([
     "INBOX",
-    ...(primary ? ["CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"] : []),
+    ...tabs,
     "PINNED",
     "IMPORTANT",
     "SENT",
@@ -131,6 +133,16 @@
     <button class="item" onclick={onsettings}>
       <span class="with-icon"><Gear size={16} strokeWidth={1.7} /> Settings</span>
     </button>
+    <button
+      class="icon-btn console"
+      aria-label="Activity console"
+      aria-pressed={settings.value.consoleOpen}
+      title={settings.value.consoleOpen ? "Hide the activity console" : "Show the activity console"}
+      onclick={() => {
+        app.sidebarOpen = false;
+        settings.update({ consoleOpen: !settings.value.consoleOpen });
+      }}><SquareTerminal size={17} strokeWidth={1.7} /></button
+    >
   </div>
 </nav>
 
@@ -282,7 +294,18 @@
     gap: 10px;
   }
   .bottom {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     padding: 6px 8px calc(8px + var(--safe-bottom));
     border-top: 1px solid var(--line);
+  }
+  .bottom .item {
+    flex: 1;
+    min-width: 0;
+  }
+  .console {
+    width: 38px;
+    height: 38px;
   }
 </style>

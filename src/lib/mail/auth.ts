@@ -11,6 +11,7 @@
  * or entered by, the person adding an account.
  */
 import { base64UrlEncode, httpFetch, isTauri, secretDelete, secretGet, secretSet } from "../platform";
+import { log } from "../log.svelte";
 import { sha256 } from "./sha256";
 
 export const SCOPES = [
@@ -186,8 +187,10 @@ export async function accessToken(email: string, force = false): Promise<string>
         grant_type: "refresh_token",
       });
       cache.set(email, { token: t.access_token, expires: Date.now() + t.expires_in * 1000 });
+      log.info("auth", `New access token for ${email} (valid ${Math.round(t.expires_in / 60)} min)`);
       return t.access_token;
     } catch (e) {
+      log.warn("auth", `Access token for ${email} refused: ${e instanceof Error ? e.message : String(e)}`);
       if (e instanceof AuthError) throw new AuthError(e.message, email);
       throw e;
     }

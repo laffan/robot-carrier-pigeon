@@ -17,7 +17,8 @@
   .toasts {
     position: fixed;
     left: 50%;
-    bottom: calc(20px + var(--safe-bottom));
+    /* Above the activity console while it's open. */
+    bottom: calc(20px + var(--console-h, var(--safe-bottom)));
     transform: translateX(-50%);
     z-index: 100;
     display: flex;

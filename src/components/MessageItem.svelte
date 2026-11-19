@@ -6,6 +6,7 @@
   import type { Message, Thread } from "../lib/mail/types";
   import { settings } from "../lib/settings.svelte";
   import { fullDate } from "../lib/util";
+  import { log } from "../lib/log.svelte";
   import Attachments from "./Attachments.svelte";
   import MailBody from "./MailBody.svelte";
   import Popover from "./Popover.svelte";
@@ -42,10 +43,11 @@
     menuOpen = false;
     const idx = thread.messages.findIndex((m) => m.id === message.id);
     const ids = thread.messages.slice(idx).map((m) => m.id);
+    log.info("action", `Mark unread from message ${idx + 1} of ${thread.messages.length}`);
     try {
       await app.backend(thread.account).modifyMessages(ids, ["UNREAD"], []);
       app.closeThread();
-      app.refresh();
+      app.refresh("marked unread");
     } catch (err) {
       app.handleError(err, thread.account);
     }
@@ -56,7 +58,7 @@
   }
 </script>
 
-<article class="msg" class:expanded class:draft={isDraft}>
+<article class="msg" class:expanded class:draft={isDraft} data-message-id={message.id}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="head" onclick={isDraft ? () => composer.openDraft(thread.account, message, thread.id) : ontoggle}>

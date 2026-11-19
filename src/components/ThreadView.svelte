@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy, tick } from "svelte";
   import { ArrowLeft, Archive, Trash2, Mail, Ellipsis, Reply, ReplyAll, Forward, Inbox, FolderInput, Tag, Pin } from "@lucide/svelte";
   import { app, threadKey } from "../lib/app.svelte";
   import { composer } from "../lib/compose.svelte";
@@ -57,7 +58,7 @@
       if (lastReal) open.add(lastReal.id);
       expanded = open;
       contacts.harvest(thread);
-      queueMicrotask(() => scroller?.scrollTo({ top: 0 }));
+      settleOn(lastReal?.id);
       return;
     }
     const fresh = thread.messages.filter((m) => !known.has(m.id) && !m.labelIds.includes("DRAFT"));
@@ -66,6 +67,56 @@
       expanded = new Set([...expanded, ...fresh.map((m) => m.id)]);
     }
   });
+
+  // ---- opening at the latest message --------------------------------------
+  //
+  // A conversation opens with the top of its latest message at the middle of
+  // the reading pane (or scrolled as far as it goes). Message bodies load in
+  // frames that grow after they render, which moves everything below them, so
+  // the position is kept until the reader scrolls, taps or types, or a few
+  // seconds pass.
+
+  const SETTLE_MS = 4000;
+  let settle: { id: string; until: number; observer: ResizeObserver } | null = null;
+
+  async function settleOn(id: string | undefined) {
+    stopSettling();
+    await tick();
+    const el = scroller;
+    const inner = el?.querySelector(".inner");
+    if (!id || !el || !inner) return el?.scrollTo({ top: 0 });
+    const observer = new ResizeObserver(() => {
+      if (settle && Date.now() < settle.until) place();
+      else stopSettling();
+    });
+    settle = { id, until: Date.now() + SETTLE_MS, observer };
+    observer.observe(inner);
+    place();
+    el.addEventListener("wheel", stopSettling, { passive: true, once: true });
+    el.addEventListener("touchstart", stopSettling, { passive: true, once: true });
+    el.addEventListener("pointerdown", stopSettling, { once: true });
+    window.addEventListener("keydown", stopSettling, { once: true });
+  }
+
+  function place() {
+    const el = scroller;
+    const msg = settle && el?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(settle.id)}"]`);
+    if (!el || !msg) return;
+    const top = msg.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+    el.scrollTop = Math.max(0, top - el.clientHeight / 2);
+  }
+
+  function stopSettling() {
+    if (!settle) return;
+    settle.observer.disconnect();
+    settle = null;
+    scroller?.removeEventListener("wheel", stopSettling);
+    scroller?.removeEventListener("touchstart", stopSettling);
+    scroller?.removeEventListener("pointerdown", stopSettling);
+    window.removeEventListener("keydown", stopSettling);
+  }
+
+  onDestroy(stopSettling);
 
   function toggle(id: string) {
     const next = new Set(expanded);
